@@ -1,27 +1,51 @@
-
-
-name: Digicert Assesment CI with Maven
-
+name: Build and Test
 on:
   push:
-    branches: [ master ]
+    branches:
+      - master
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      test-run:
+        description: 'Run Tests (y/n)?'
+        required: true
+        default: 'y'
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    services:
+      credit-api:
+        image: eliasnogueira/combined-credit-api:latest
+        ports:
+          - 8088:8088
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up JDK 1.8
-      uses: actions/setup-java@v1
-      with:
-        java-version: '1.8'
-        distribution: 'temurin'
-        cache: maven
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
+      - uses: actions/checkout@v4
+      - name: Set up JDK 22
+        uses: actions/setup-java@v4
+        with:
+          java-version: 22
+          distribution: oracle
 
-    
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Wait for the backend service to start
+        run: wget -qO- https://raw.githubusercontent.com/eficode/wait-for/$WAIT_FOR_VERSION/wait-for | sh -s -- http://localhost:8088/actuator/health -t 30 -- echo "Backend is up"
+        env:
+          WAIT_FOR_VERSION: 4df3f9262d84cab0039c07bf861045fbb3c20ab7
+
+      - name: Build with Maven
+        run: mvn -q -B -DskipTests package --file pom.xml
+
+      - name: Run API Tests
+        run: mvn -q -B test -Dgroups="APITests"
+
+      - name: Run Functional Tests
+        run: mvn -q -B test -Dgroups="testRunner"
